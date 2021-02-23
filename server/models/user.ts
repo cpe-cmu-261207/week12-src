@@ -1,6 +1,5 @@
-import { Sequelize, Model, DataTypes } from 'sequelize'
-
-export const sequelize = new Sequelize('sqlite::memory:')
+import { Model, DataTypes } from 'sequelize'
+import { sequelize } from '../configs/sequelize'
 
 export interface UserModel {
   id?: number
