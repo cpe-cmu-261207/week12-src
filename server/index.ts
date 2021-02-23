@@ -5,7 +5,9 @@ import fs from 'fs'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { body, validationResult } from 'express-validator'
-import { sequelize, User, UserModel } from './models/user'
+import { sequelize } from './configs/sequelize'
+import { User, UserModel } from './models/user'
+import { Todo, TodoModel } from './models/todo'
 
 const SECRET_KEY = process.env.SECRET_KEY as string
 const PORT = process.env.PORT || 3000
@@ -14,72 +16,46 @@ const app = express()
 app.use(bodyParser.json())
 app.use(cors())
 
-interface DbSchema {
-  todos: Todos
-}
-
-interface Todo {
-  id: number
-  title: string
-}
-
-interface Todos {
-  [username: string]: Todo[]
-}
-
-type JWTPayload = Pick<UserModel, 'id' | 'username'>
-
-const readDbFile = (): DbSchema => {
-  const raw = fs.readFileSync('db.json', 'utf8')
-  const db: DbSchema = JSON.parse(raw)
-  return db
-}
+type JWTPayload = Required<Pick<UserModel, 'id' | 'username'>>
 
 app.get('/', (req, res) => {
   res.json({ message: 'Hello world' })
 })
 
-app.get('/todos', (req, res) => {
+app.get('/todos', async (req, res) => {
   const token = req.query.token as string
 
   try {
     const data = jwt.verify(token, SECRET_KEY) as JWTPayload
-    const db = readDbFile()
-    const todos = db.todos[data.username] || []
+    const todos = await Todo.findAll({ where: { userId: data.id } })
 
     res.json(todos)
-
   } catch(e) {
     res.status(401)
     res.json({ message: e.message })
   }
 })
 
-type CreateTodosArgs = Pick<Todo, 'title'>
+type CreateTodosArgs = Pick<TodoModel, 'title' | 'description'>
 
 app.post<any, any, CreateTodosArgs>('/todos',
   body('title').isString(),
-  (req, res) => {
+  async (req, res) => {
     const token = req.query.token as string
-    const { title } = req.body
+    const { title, description } = req.body
 
     try {
       const data = jwt.verify(token, SECRET_KEY) as JWTPayload
-      const db = readDbFile()
-      const todos = db.todos[data.username] || []
 
-      const newTodo: Todo = {
-        id: Date.now(),
+      const todo = await Todo.create({
+        userId: data.id,
         title,
-      }
-      todos.push(newTodo)
-
-      db.todos[data.username] = todos
-      fs.writeFileSync('db.json', JSON.stringify(db))
+        description,
+      })
 
       res.json({
         message: 'Created todo',
-        data: newTodo,
+        data: todo,
       })
     } catch(e) {
       res.status(401)
@@ -87,7 +63,7 @@ app.post<any, any, CreateTodosArgs>('/todos',
     }
   })
 
-app.delete('/todos/:id', (req, res) => {
+app.delete('/todos/:id', async (req, res) => {
   const id = Number(req.params.id)
   const token = req.query.token as string
 
@@ -95,20 +71,16 @@ app.delete('/todos/:id', (req, res) => {
 
   try {
     const data = jwt.verify(token, SECRET_KEY) as JWTPayload
-    const db = readDbFile()
-    const todos = db.todos[data.username] || []
 
-    if (!todos.find(todo => todo.id === id)) {
+    const todo = await Todo.destroy({ where: { id, userId: data.id } })
+
+    if (todo === 0) {
       res.status(404)
       res.json({
         message: 'This todo not found'
       })
       return
     }
-
-    const newTodos = todos.filter(todo => todo.id !== id)
-    db.todos[data.username] = newTodos
-    fs.writeFileSync('db.json', JSON.stringify(db))
 
     res.json({
       message: 'Deleted todo'
